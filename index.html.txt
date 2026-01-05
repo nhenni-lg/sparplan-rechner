@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sparplanrechner (Monte Carlo Simulation)</title>
+    <meta name="description" content="Simuliere deine Geldanlage mit Monte-Carlo-Methoden, Inflation und GARCH-Modellen.">
+    
+    <!-- PWA Meta Tags -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#4f46e5">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            /* Prevent pull-to-refresh on mobile which feels un-app-like */
+            overscroll-behavior-y: none; 
+        }
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 5px solid #3498db;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .tooltip {
+            position: relative;
+            display: inline-block;
+        }
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: 260px; 
+            background-color: #555;
+            color: #fff;
+            text-align: center;
+            border-radius: 6px;
+            padding: 5px 10px;
+            position: absolute;
+            z-index: 10;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -130px; 
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 0.875rem;
+        }
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
+        .chart-container {
+            margin-top: 2rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #e5e7eb;
+        }
+        .scenario-block {
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background-color: #f9fafb;
+        }
+        .scenario-block h3 {
+            margin-bottom: 0.75rem;
+            font-weight: 600;
+            color: #1f2937;
+        }
+        .results-block {
+            border: 1px solid #e5e7eb;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        .results-block h4 {
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 0.75rem;
+        }
+        .results-block .result-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        .results-block .result-item span {
+            font-size: 0.8rem;
+            color: #4b5563;
+        }
+        #annualGrowthScenarioSelector {
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            background-color: #f9fafb;
+            border-radius: 0.375rem;
+            border: 1px solid #e5e7eb;
+        }
+        #annualGrowthScenarioSelector label {
+            margin-right: 1rem;
+            font-size: 0.875rem;
+            color: #374151;
+        }
+        #annualGrowthScenarioSelector input[type="checkbox"] {
+            margin-right: 0.25rem;
+            accent-color: #4f46e5; /* Indigo */
+        }
+        .garch-params { 
+            background-color: #eef2ff; 
+            padding: 0.75rem;
+            border-radius: 0.375rem;
+            margin-top: 0.75rem;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="bg-white p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-4xl">
+        <h1 class="text-2xl sm:text-3xl font-bold text-center text-gray-800 mb-6">Sparplanrechner (Monte Carlo)</h1>
+
+        <div class="mb-6 p-4 bg-blue-50 border-l-4 border-blue-500 rounded-md">
+            <h2 class="text-lg font-semibold text-blue-700 mb-1">Was ist eine Monte-Carlo-Simulation?</h2>
+            <p class="text-sm text-blue-600">
+                Die Monte-Carlo-Simulation ist eine mathematische Technik, die Zufallsstichproben verwendet, um mögliche Ergebnisse eines unsicheren Ereignisses zu modellieren. Sie können mehrere Szenarien definieren, um deren Ergebnisse zu vergleichen. Negative Sparraten simulieren Entnahmepläne. Optional kann ein GARCH(1,1)-Modell zur Simulation der Volatilität verwendet werden (basierend auf täglichen Parametern, aggregiert zu Monatsrenditen, optional mit standardisierten Student's t-verteilten Schocks). Die Ergebnisse können nominal und inflationsbereinigt (real) angezeigt werden.
+            </p>
+        </div>
+
+        <div id="message-box" class="hidden p-3 rounded-md mb-4 text-sm"></div>
+
+        <div class="mb-4">
+            <label for="numSimulations" class="block text-sm font-medium text-gray-700 mb-1">
+                Anzahl Simulationen (global)
+                <span class="tooltip">ⓘ
+                    <span class="tooltiptext">Gilt für alle Szenarien. Mehr Simulationen führen zu genaueren Ergebnissen, dauern aber länger. Empfohlen: 1000-10000.</span>
+                </span>
+            </label>
+            <input type="number" id="numSimulations" value="5000" class="w-full md:w-1/2 p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+        </div>
+        
+        <div id="scenariosContainer">
+            </div>
+
+        <button id="addScenarioButton" class="mt-2 mb-6 bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-150 ease-in-out flex items-center text-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 mr-2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+            Weiteres Szenario hinzufügen
+        </button>
+
+        <button id="calculateButton" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-lg shadow-md transition duration-150 ease-in-out flex items-center justify-center">
+            <svg id="button-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 mr-2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+            </svg>
+            Simulation starten
+        </button>
+        <div id="loadingIndicator" class="hidden loader mx-auto my-4"></div>
+
+        <div id="allScenariosResultsContainer" class="mt-8"></div>
+        
+        <div id="scenarioComparisonChartContainer" class="chart-container hidden">
+            <h3 class="text-lg sm:text-xl font-semibold text-gray-800 mb-4 text-center">Szenariovergleich der realen Endkapitalien</h3>
+            <canvas id="scenarioComparisonChart"></canvas>
+        </div>
+
+        <div id="histogramContainer" class="chart-container hidden">
+            <h3 id="histogramTitle" class="text-lg sm:text-xl font-semibold text-gray-800 mb-4 text-center">Verteilung der realen Simulationsergebnisse (Szenario 1)</h3>
+            <canvas id="resultsHistogram"></canvas>
+        </div>
+
+        <div id="annualGrowthChartContainer" class="chart-container hidden">
+            <h3 class="text-lg sm:text-xl font-semibold text-gray-800 mb-4 text-center">Jährliche reale Kapitalentwicklung</h3>
+            <div id="annualGrowthScenarioSelector" class="hidden">
+                </div>
+            <canvas id="annualGrowthChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // PWA Service Worker Registration
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(registration => {
+                        console.log('ServiceWorker registration successful with scope: ', registration.scope);
+                    })
+                    .catch(err => {
+                        console.log('ServiceWorker registration failed: ', err);
+                    });
+            });
+        }
+
+        const scenariosContainer = document.getElementById('scenariosContainer');
+        const addScenarioButton = document.getElementById('addScenarioButton');
+        const numSimulationsEl = document.getElementById('numSimulations');
+        const calculateButton = document.getElementById('calculateButton');
+        const buttonIcon = document.getElementById('button-icon');
+        const buttonTextNode = calculateButton.childNodes[2]; 
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        
+        const allScenariosResultsContainerEl = document.getElementById('allScenariosResultsContainer');
+        const messageBox = document.getElementById('message-box');
+
+        const histogramContainerEl = document.getElementById('histogramContainer');
+        const histogramCanvas = document.getElementById('resultsHistogram');
+        const histogramTitleEl = document.getElementById('histogramTitle');
+        let resultsHistogramChart = null; 
+
+        const annualGrowthChartContainerEl = document.getElementById('annualGrowthChartContainer');
+        const annualGrowthScenarioSelectorEl = document.getElementById('annualGrowthScenarioSelector');
+        const annualGrowthChartCanvas = document.getElementById('annualGrowthChart');
+        let annualGrowthLineChart = null;
+        let allSimulatedScenariosData = []; 
+
+        const scenarioComparisonChartContainerEl = document.getElementById('scenarioComparisonChartContainer');
+        const scenarioComparisonChartCanvas = document.getElementById('scenarioComparisonChart');
+        let scenarioComparisonBarChart = null;
+
+        let nextScenarioId = 1; 
+        const scenarioColors = [ 
+            { border: 'rgba(54, 162, 235, 0.9)', deposit: 'rgba(153, 102, 255, 0.9)', p5: 'rgba(255, 99, 132, 0.7)', avg: 'rgba(75, 192, 192, 0.7)', p95: 'rgba(255, 206, 86, 0.7)' }, 
+            { border: 'rgba(255, 159, 64, 0.9)', deposit: 'rgba(255, 99, 71, 0.9)',   p5: 'rgba(255, 99, 132, 0.6)', avg: 'rgba(75, 192, 192, 0.6)', p95: 'rgba(255, 206, 86, 0.6)' },  
+            { border: 'rgba(123, 239, 178, 0.9)', deposit: 'rgba(60, 179, 113, 0.9)', p5: 'rgba(255, 99, 132, 0.5)', avg: 'rgba(75, 192, 192, 0.5)', p95: 'rgba(255, 206, 86, 0.5)' }, 
+            { border: 'rgba(255, 218, 121, 0.9)', deposit: 'rgba(218, 165, 32, 0.9)', p5: 'rgba(255, 99, 132, 0.4)', avg: 'rgba(75, 192, 192, 0.4)', p95: 'rgba(255, 206, 86, 0.4)' }, 
+            { border: 'rgba(179, 157, 219, 0.9)', deposit: 'rgba(106, 90, 205, 0.9)', p5: 'rgba(255, 99, 132, 0.3)', avg: 'rgba(75, 192, 192, 0.3)', p95: 'rgba(255, 206, 86, 0.3)' }  
+        ];
+        
+        function createScenarioHTML(scenarioId, defaults = {}) {
+            const defaultInitialInvestment = defaults.initialInvestment || "1000";
+            const defaultMonthlySavings = defaults.monthlySavings || "100";
+            const defaultInvestmentHorizon = defaults.investmentHorizon || "10";
+            const defaultExpectedReturn = defaults.expectedReturn || "7";
+            const defaultVolatility = defaults.volatility || "15"; 
+            const defaultVolatilityModel = defaults.volatilityModel || "normal";
+            const defaultAnnualInflation = defaults.annualInflation || "2"; 
+            
+            const defaultOmega = defaults.omega || "0.0123";   
+            const defaultAlpha = defaults.alpha || "0.1098";  
+            const defaultBeta = defaults.beta || "0.8772";    
+            const defaultGarchTDegreesFreedom = defaults.garchTDegreesFreedom || "5"; 
+
+
+            return `
+                <div id="scenario-${scenarioId}" class="scenario-block mt-4">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-lg">Szenario ${scenarioId} ${scenarioId === 1 ? '(Hauptszenario)' : ''}</h3>
+                        ${scenarioId !== 1 ? `<button class="removeScenarioButton bg-red-500 hover:bg-red-600 text-white text-xs py-1 px-2 rounded-md" data-scenario-id="${scenarioId}">Szenario entfernen</button>` : ''}
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-x-4 gap-y-3">
+                        <div><label for="initialInvestment-${scenarioId}" class="block text-sm font-medium text-gray-700 mb-1">Anfangsinvestition (€)</label><input type="number" id="initialInvestment-${scenarioId}" value="${defaultInitialInvestment}" class="w-full p-2 border border-gray-300 rounded-lg scenario-input"></div>
+                        <div>
+                            <label for="monthlySavings-${scenarioId}" class="block text-sm font-medium text-gray-700 mb-1">
+                                Monatl. Sparrate/Auszahlung (€)
+                                <span class="tooltip">ⓘ<span class="tooltiptext">Positiv für Sparrate, negativ für Auszahlung (Entnahmeplan).</span></span>
+                            </label>
+                            <input type="number" id="monthlySavings-${scenarioId}" value="${defaultMonthlySavings}" class="w-full p-2 border border-gray-300 rounded-lg scenario-input">
+                        </div>
+                        <div><label for="investmentHorizon-${scenarioId}" class="block text-sm font-medium text-gray-700 mb-1">Anlagehorizont (Jahre)</label><input type="number" id="investmentHorizon-${scenarioId}" value="${defaultInvestmentHorizon}" class="w-full p-2 border border-gray-300 rounded-lg scenario-input"></div>
+                        <div><label for="expectedReturn-${scenarioId}" class="block text-sm font-medium text-gray-700 mb-1">Erw. jährl. Rendite (%)</label><input type="number" id="expectedReturn-${scenarioId}" value="${defaultExpectedReturn}" step="0.1" class="w-full p-2 border border-gray-300 rounded-lg scenario-input"></div>
+                        
+                        <div>
+                            <label for="annualInflation-${scenarioId}" class="block text-sm font-medium text-gray-700 mb-1">
+                                Erw. jährl. Inflation (%)
+                                <span class="tooltip">ⓘ<span class="tooltiptext">Durchschnittliche jährliche Inflationsrate zur Berechnung des realen Kapitals.</span></span>
+                            </label>
+                            <input type="number" id="annualInflation-${scenarioId}" value="${defaultAnnualInflation}" step="0.1" class="w-full p-2 border border-gray-300 rounded-lg scenario-input">
+                        </div>
+                        <div></div> 
+
+
+                        <div class="md:col-span-3">
+                            <label for="volatilityModel-${scenarioId}" class="block text-sm font-medium text-gray-700 mb-1">Volatilitätsmodell</label>
+                            <select id="volatilityModel-${scenarioId}" class="w-full p-2 border border-gray-300 rounded-lg scenario-input volatility-model-selector" data-scenario-id="${scenarioId}">
+                                <option value="normal" ${defaultVolatilityModel === 'normal' ? 'selected' : ''}>Normalverteilung (konstante Vola.)</option>
+                                <option value="garch" ${defaultVolatilityModel === 'garch' ? 'selected' : ''}>GARCH(1,1) (dynamische Vola.)</option>
+                            </select>
+                        </div>
+
+                        <div class="md:col-span-1">
+                            <label for="volatility-${scenarioId}" class="block text-sm font-medium text-gray-700 mb-1">
+                                Volatilität p.a. (%)
+                                 <span class="tooltip">ⓘ<span class="tooltiptext" id="volatilityTooltip-${scenarioId}">Standardabweichung der jährlichen Renditen. Bei GARCH: initiale jährliche Volatilität für Modellstart.</span></span>
+                            </label>
+                            <input type="number" id="volatility-${scenarioId}" value="${defaultVolatility}" step="0.1" class="w-full p-2 border border-gray-300 rounded-lg scenario-input">
+                        </div>
+                        
+                        <div id="garchParams-${scenarioId}" class="md:col-span-3 garch-params ${defaultVolatilityModel === 'garch' ? '' : 'hidden'}">
+                            <p class="text-sm font-semibold text-gray-700 mb-2">GARCH(1,1) Parameter (für tägliche, prozentuale Renditen):</p>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-2">
+                                <div>
+                                    <label for="garchOmega-${scenarioId}" class="block text-xs font-medium text-gray-600 mb-0.5">Omega (ω) <span class="tooltip">ⓘ<span class="tooltiptext">Konstanter Term in der täglichen Varianzgleichung (für %-Renditen). Bsp: V-Lab MSCI World: 0.0123</span></span></label>
+                                    <input type="number" id="garchOmega-${scenarioId}" value="${defaultOmega}" step="0.0001" class="w-full p-1.5 text-sm border border-gray-300 rounded-md scenario-input">
+                                </div>
+                                <div>
+                                    <label for="garchAlpha-${scenarioId}" class="block text-xs font-medium text-gray-600 mb-0.5">Alpha (α) <span class="tooltip">ⓘ<span class="tooltiptext">Reaktion auf gestrige quadrierte Schocks (für tägl. %-Renditen). Typ. 0.05-0.2. V-Lab MSCI World: 0.1098</span></span></label>
+                                    <input type="number" id="garchAlpha-${scenarioId}" value="${defaultAlpha}" step="0.001" class="w-full p-1.5 text-sm border border-gray-300 rounded-md scenario-input">
+                                </div>
+                                <div>
+                                    <label for="garchBeta-${scenarioId}" class="block text-xs font-medium text-gray-600 mb-0.5">Beta (β) <span class="tooltip">ⓘ<span class="tooltiptext">Persistenz der gestrigen Varianz (für tägl. %-Renditen). Typ. 0.7-0.95. V-Lab MSCI World: 0.8772. Alpha + Beta < 1.</span></span></label>
+                                    <input type="number" id="garchBeta-${scenarioId}" value="${defaultBeta}" step="0.001" class="w-full p-1.5 text-sm border border-gray-300 rounded-md scenario-input">
+                                </div>
+                                <div>
+                                    <label for="garchTDegreesFreedom-${scenarioId}" class="block text-xs font-medium text-gray-600 mb-0.5">t-Verteilung Freiheitsgr. (ν) <span class="tooltip">ⓘ<span class="tooltiptext">Für standardisierte Student's t-Schocks (Varianz 1). Muss >2 sein, typ. 3-8 für "fat tails". Leer für Normalverteilungsschocks.</span></span></label>
+                                    <input type="number" id="garchTDegreesFreedom-${scenarioId}" value="${defaultGarchTDegreesFreedom}" step="1" min="1" class="w-full p-1.5 text-sm border border-gray-300 rounded-md scenario-input">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+        }
+        
+        function toggleGarchParamsVisibility(scenarioId) {
+            const modelSelector = document.getElementById(`volatilityModel-${scenarioId}`);
+            const garchParamsDiv = document.getElementById(`garchParams-${scenarioId}`);
+            const volatilityTooltip = document.getElementById(`volatilityTooltip-${scenarioId}`);
+            if (modelSelector && garchParamsDiv && volatilityTooltip) {
+                if (modelSelector.value === 'garch') {
+                    garchParamsDiv.classList.remove('hidden');
+                    volatilityTooltip.textContent = "Initiale jährliche Volatilität für GARCH-Modellstart.";
+                } else {
+                    garchParamsDiv.classList.add('hidden');
+                    volatilityTooltip.textContent = "Standardabweichung der jährlichen Renditen.";
+                }
+            }
+        }
+
+        scenariosContainer.addEventListener('change', (event) => {
+            if (event.target.classList.contains('volatility-model-selector')) {
+                toggleGarchParamsVisibility(event.target.dataset.scenarioId);
+            }
+        });
+
+        addScenarioButton.addEventListener('click', () => {
+            const existingScenarios = scenariosContainer.querySelectorAll('.scenario-block');
+            let defaults = {};
+            if (existingScenarios.length > 0) {
+                const lastScenarioElement = existingScenarios[existingScenarios.length - 1];
+                const sourceId = lastScenarioElement.id.split('-')[1];
+                defaults = {
+                    initialInvestment: document.getElementById(`initialInvestment-${sourceId}`)?.value,
+                    monthlySavings: document.getElementById(`monthlySavings-${sourceId}`)?.value,
+                    investmentHorizon: document.getElementById(`investmentHorizon-${sourceId}`)?.value,
+                    expectedReturn: document.getElementById(`expectedReturn-${sourceId}`)?.value,
+                    annualInflation: document.getElementById(`annualInflation-${sourceId}`)?.value,
+                    volatility: document.getElementById(`volatility-${sourceId}`)?.value,
+                    volatilityModel: document.getElementById(`volatilityModel-${sourceId}`)?.value,
+                    omega: document.getElementById(`garchOmega-${sourceId}`)?.value,
+                    alpha: document.getElementById(`garchAlpha-${sourceId}`)?.value,
+                    beta: document.getElementById(`garchBeta-${sourceId}`)?.value,
+                    garchTDegreesFreedom: document.getElementById(`garchTDegreesFreedom-${sourceId}`)?.value,
+                };
+            }
+            
+            const currentScenarioId = nextScenarioId++;
+            scenariosContainer.insertAdjacentHTML('beforeend', createScenarioHTML(currentScenarioId, defaults));
+            toggleGarchParamsVisibility(currentScenarioId); 
+        });
+        
+        document.addEventListener('DOMContentLoaded', () => {
+             scenariosContainer.innerHTML = createScenarioHTML(nextScenarioId++);
+             toggleGarchParamsVisibility('1');
+        });
+
+        scenariosContainer.addEventListener('click', (event) => {
+            if (event.target.classList.contains('removeScenarioButton')) {
+                const scenarioIdToRemove = event.target.dataset.scenarioId;
+                document.getElementById(`scenario-${scenarioIdToRemove}`)?.remove();
+            }
+        });
+
+        function randomNorm() { 
+            let u1 = 0, u2 = 0;
+            while (u1 === 0) u1 = Math.random(); 
+            while (u2 === 0) u2 = Math.random();
+            return Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+        }
+
+        function randomStudentT(degreesOfFreedom) {
+            if (degreesOfFreedom <= 2) { 
+                return randomNorm();
+            }
+            const Z = randomNorm(); 
+            let V = 0; 
+            for (let i = 0; i < degreesOfFreedom; i++) {
+                const norm = randomNorm();
+                V += norm * norm; 
+            }
+            if (V === 0) { 
+                 return randomNorm(); 
+            }
+            const t_variate = Z / Math.sqrt(V / degreesOfFreedom); 
+            const scaleFactor = Math.sqrt((degreesOfFreedom - 2) / degreesOfFreedom);
+            return t_variate * scaleFactor;
+        }
+
+
+        function showMessage(message, type = 'error') {
+            messageBox.textContent = message;
+            messageBox.className = 'p-3 rounded-md mb-4 text-sm'; 
+            if (type === 'error') messageBox.classList.add('bg-red-100', 'text-red-700', 'border', 'border-red-500');
+            else if (type === 'success') messageBox.classList.add('bg-green-100', 'text-green-700', 'border', 'border-green-500');
+            else if (type === 'info') messageBox.classList.add('bg-blue-100', 'text-blue-700', 'border', 'border-blue-500');
+            messageBox.classList.remove('hidden');
+        }
+
+        function hideMessage() { messageBox.classList.add('hidden'); }
+        function formatCurrency(value) { return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(value); }
+
+        function validateScenarioInputs(scenarioId) {
+            const getEl = (type) => document.getElementById(`${type}-${scenarioId}`);
+            const model = getEl('volatilityModel')?.value;
+            const fields = {
+                initialInvestment: parseFloat(getEl('initialInvestment')?.value),
+                monthlySavings: parseFloat(getEl('monthlySavings')?.value), 
+                investmentHorizonYears: parseInt(getEl('investmentHorizon')?.value),
+                annualExpectedReturn: parseFloat(getEl('expectedReturn')?.value), 
+                annualInflation: parseFloat(getEl('annualInflation')?.value), 
+                annualVolatility: parseFloat(getEl('volatility')?.value), 
+                volatilityModel: model,
+                garchOmega: model === 'garch' ? parseFloat(getEl('garchOmega')?.value) : null,
+                garchAlpha: model === 'garch' ? parseFloat(getEl('garchAlpha')?.value) : null,
+                garchBeta: model === 'garch' ? parseFloat(getEl('garchBeta')?.value) : null,
+                garchTDegreesFreedom: model === 'garch' ? getEl('garchTDegreesFreedom')?.value : null, 
+            };
+
+            if (fields.garchTDegreesFreedom && fields.garchTDegreesFreedom.trim() !== "") {
+                fields.garchTDegreesFreedom = parseFloat(fields.garchTDegreesFreedom);
+            } else if (model === 'garch') {
+                 fields.garchTDegreesFreedom = null; 
+            }
+
+            if (!getEl('initialInvestment') || !getEl('monthlySavings') || !getEl('investmentHorizon') || 
+                !getEl('expectedReturn') || !getEl('annualInflation') || !getEl('volatility') || !getEl('volatilityModel')) { 
+                return [`Szenario ${scenarioId}: Einige Basiseingabefelder wurden nicht gefunden.`];
+            }
+            if (model === 'garch' && (!getEl('garchOmega') || !getEl('garchAlpha') || !getEl('garchBeta') || !getEl('garchTDegreesFreedom'))) { 
+                 return [`Szenario ${scenarioId}: GARCH Parameterfelder (inkl. Freiheitsgrade) nicht gefunden.`];
+            }
+            
+            let errors = [];
+            if (isNaN(fields.initialInvestment) || fields.initialInvestment < 0) errors.push(`Szenario ${scenarioId}: Ungültige Anfangsinvestition.`);
+            if (isNaN(fields.monthlySavings)) errors.push(`Szenario ${scenarioId}: Ungültige monatliche Sparrate / Auszahlung.`);
+            if (isNaN(fields.investmentHorizonYears) || fields.investmentHorizonYears <= 0 || !Number.isInteger(fields.investmentHorizonYears)) errors.push(`Szenario ${scenarioId}: Ungültiger Anlagehorizont.`);
+            if (isNaN(fields.annualExpectedReturn)) errors.push(`Szenario ${scenarioId}: Ungültige erwartete Rendite.`);
+            if (isNaN(fields.annualInflation) || fields.annualInflation < -10 || fields.annualInflation > 50) errors.push(`Szenario ${scenarioId}: Ungültige Inflationsrate (erlaubt: -10% bis 50%).`); 
+            if (isNaN(fields.annualVolatility) || fields.annualVolatility < 0) errors.push(`Szenario ${scenarioId}: Ungültige (initiale) Volatilität.`);
+
+            if (model === 'garch') {
+                if (isNaN(fields.garchOmega) || fields.garchOmega <= 0) errors.push(`Szenario ${scenarioId}: GARCH Omega (ω) muss positiv sein.`);
+                if (isNaN(fields.garchAlpha) || fields.garchAlpha < 0) errors.push(`Szenario ${scenarioId}: GARCH Alpha (α) muss >= 0 sein.`);
+                if (isNaN(fields.garchBeta) || fields.garchBeta < 0) errors.push(`Szenario ${scenarioId}: GARCH Beta (β) muss >= 0 sein.`);
+                if (!isNaN(fields.garchAlpha) && !isNaN(fields.garchBeta) && (fields.garchAlpha + fields.garchBeta >= 1)) {
+                    errors.push(`Szenario ${scenarioId}: GARCH Stationaritätsbedingung (Alpha + Beta < 1) nicht erfüllt.`);
+                }
+                if (fields.garchTDegreesFreedom !== null && (isNaN(fields.garchTDegreesFreedom) || fields.garchTDegreesFreedom <= 2)) { 
+                    errors.push(`Szenario ${scenarioId}: GARCH t-Verteilung Freiheitsgrade müssen eine Zahl > 2 sein für standardisierte Schocks.`);
+                }
+            }
+            return errors;
+        }
+
+        function createHistogramData(data, numBins = 20) {
+            if (!data || data.length === 0) return { labels: [], values: [] };
+            const min = Math.min(...data);
+            const max = Math.max(...data);
+            if (min === max) return { labels: [formatCurrency(min)], values: [data.length] };
+            
+            const binSize = (max - min) / numBins;
+            const bins = new Array(numBins).fill(0);
+            const labels = new Array(numBins);
+
+            for (let i = 0; i < numBins; i++) {
+                const binStart = min + i * binSize;
+                const binEnd = min + (i + 1) * binSize;
+                labels[i] = `${formatCurrency(binStart)} - ${formatCurrency(binEnd)}`;
+            }
+            for (const value of data) {
+                let binIndex = Math.floor((value - min) / binSize);
+                if (binIndex >= numBins) binIndex = numBins - 1; 
+                if (binIndex < 0) binIndex = 0; 
+                bins[binIndex]++;
+            }
+            return { labels, values: bins };
+        }
+
+        function displayHistogram(finalCapitalsReal, scenarioId) { 
+            if (resultsHistogramChart) resultsHistogramChart.destroy();
+            const histogramData = createHistogramData(finalCapitalsReal);
+            histogramTitleEl.textContent = `Verteilung der realen Simulationsergebnisse (Szenario ${scenarioId})`; 
+            const ctx = histogramCanvas.getContext('2d');
+            resultsHistogramChart = new Chart(ctx, { 
+                type: 'bar',
+                data: {
+                    labels: histogramData.labels,
+                    datasets: [{
+                        label: `Häufigkeit der realen Endkapitalien (Szen. ${scenarioId})`,
+                        data: histogramData.values,
+                        backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: true, scales: { y: { beginAtZero: true, title: { display: true, text: 'Anzahl Simulationen' }}, x: { title: { display: true, text: 'Reales Endkapital (€)' }}}, plugins: { tooltip: { callbacks: { label: context => `${context.dataset.label || ''}: ${context.parsed.y}` }}} }
+            });
+            histogramContainerEl.classList.remove('hidden');
+        }
+        
+        function populateAnnualGrowthScenarioSelector(scenariosData) {
+            annualGrowthScenarioSelectorEl.innerHTML = '<p class="text-sm font-medium text-gray-700 mb-2">Angezeigte Szenarien im Diagramm (reale Werte):</p>'; 
+            scenariosData.forEach((scenario) => {
+                const checkboxId = `scenario-toggle-${scenario.id}`;
+                const label = document.createElement('label');
+                label.htmlFor = checkboxId;
+                label.className = 'inline-flex items-center mr-4';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = checkboxId;
+                checkbox.checked = true; 
+                checkbox.dataset.scenarioId = scenario.id;
+                checkbox.className = 'form-checkbox h-4 w-4 rounded mr-1';
+                
+                const originalIndex = allSimulatedScenariosData.findIndex(s => s.id === scenario.id); 
+                const colorIndex = originalIndex % scenarioColors.length;
+                checkbox.style.accentColor = scenarioColors[colorIndex].border;
+
+                label.appendChild(checkbox);
+                label.appendChild(document.createTextNode(` Szenario ${scenario.id}`));
+                
+                annualGrowthScenarioSelectorEl.appendChild(label);
+                checkbox.addEventListener('change', () => displayAnnualGrowthChart(allSimulatedScenariosData)); 
+            });
+            annualGrowthScenarioSelectorEl.classList.remove('hidden');
+        }
+
+        function displayAnnualGrowthChart(fullScenariosData) { 
+            if (annualGrowthLineChart) annualGrowthLineChart.destroy();
+
+            if (!fullScenariosData || fullScenariosData.length === 0) {
+                annualGrowthChartContainerEl.classList.add('hidden');
+                annualGrowthScenarioSelectorEl.classList.add('hidden');
+                return;
+            }
+
+            annualGrowthChartContainerEl.classList.remove('hidden');
+            annualGrowthScenarioSelectorEl.classList.remove('hidden'); 
+
+            const selectedScenarioIds = Array.from(annualGrowthScenarioSelectorEl.querySelectorAll('input[type="checkbox"]:checked'))
+                                             .map(cb => cb.dataset.scenarioId);
+            
+            const scenariosToDisplay = fullScenariosData.filter(s => selectedScenarioIds.includes(s.id));
+            
+            let maxHorizon = 0;
+            scenariosToDisplay.forEach(s => {
+                if (s.investmentHorizonYears > maxHorizon) maxHorizon = s.investmentHorizonYears;
+            });
+            if (maxHorizon === 0 && scenariosToDisplay.length > 0) { 
+                 maxHorizon = Math.max(...fullScenariosData.map(s => s.investmentHorizonYears), 0); 
+            }
+
+            const labels = ['Start'].concat(Array.from({ length: maxHorizon }, (_, i) => `Jahr ${i + 1}`));
+            const datasets = [];
+
+            scenariosToDisplay.forEach((scenario) => {
+                const originalIndex = allSimulatedScenariosData.findIndex(s => s.id === scenario.id);
+                const colorIndex = originalIndex % scenarioColors.length;
+                const colorSet = scenarioColors[colorIndex];
+                
+                const realInitialInvestment = scenario.initialInvestment; 
+
+                datasets.push({
+                    label: `P5 Real (Szen. ${scenario.id})`, data: [realInitialInvestment, ...scenario.results.p5AnnualPathReal],
+                    borderColor: colorSet.p5, tension: 0.1, fill: false, borderDash: [5, 5], borderWidth: 1
+                });
+                datasets.push({
+                    label: `Durchschnitt Real (Szen. ${scenario.id})`, data: [realInitialInvestment, ...scenario.results.avgAnnualPathReal],
+                    borderColor: colorSet.avg, backgroundColor: colorSet.avg.replace(/0\.\d+/,'0.1'), 
+                    tension: 0.1, fill: 'origin', borderWidth: 1.5 
+                });
+                 datasets.push({
+                    label: `P95 Real (Szen. ${scenario.id})`, data: [realInitialInvestment, ...scenario.results.p95AnnualPathReal],
+                    borderColor: colorSet.p95, tension: 0.1, fill: false, borderDash: [5, 5], borderWidth: 1
+                });
+                datasets.push({
+                    label: `Median Real (Szen. ${scenario.id})`,
+                    data: [realInitialInvestment, ...scenario.results.p50AnnualPathReal],
+                    borderColor: colorSet.border,
+                    tension: 0.1, fill: false, borderWidth: 2, pointRadius: 3, 
+                });
+                
+                const paymentLabel = scenario.monthlySavings < 0 ? `Auszahlungen (Szen. ${scenario.id})` : `Einzahlungen (Szen. ${scenario.id})`;
+                datasets.push({
+                    label: paymentLabel,
+                    data: scenario.results.cumulativeDepositsPathNominal, 
+                    borderColor: colorSet.deposit,
+                    tension: 0.1, fill: false, borderWidth: 1.5, borderDash: [3, 3]
+                });
+            });
+
+            const ctx = annualGrowthChartCanvas.getContext('2d');
+            annualGrowthLineChart = new Chart(ctx, { 
+                type: 'line', data: { labels, datasets },
+                options: { responsive: true, maintainAspectRatio: true, scales: { y: { beginAtZero: true, title: { display: true, text: 'Reales Kapital (€)' }, ticks: { callback: value => formatCurrency(value) }}, x: { title: { display: true, text: 'Jahre' }}}, plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 15 }}, tooltip: { mode: 'index', intersect: false, callbacks: { label: context => `${context.dataset.label}: ${formatCurrency(context.parsed.y)}` }}} }
+            });
+        }
+
+        function displayScenarioComparisonChart(scenariosData) { 
+            if (scenarioComparisonBarChart) scenarioComparisonBarChart.destroy();
+            const labels = scenariosData.map(s => `Szenario ${s.id}`);
+            const datasets = [
+                { label: 'P5 Real (Pessimistisch)', data: scenariosData.map(s => s.results.p5Real), backgroundColor: 'rgba(255, 99, 132, 0.7)'},
+                { label: 'P50 Real (Median)', data: scenariosData.map(s => s.results.medianReal), backgroundColor: 'rgba(54, 162, 235, 0.7)' },
+                { label: 'P95 Real (Optimistisch)', data: scenariosData.map(s => s.results.p95Real), backgroundColor: 'rgba(255, 206, 86, 0.7)' }
+            ];
+            const ctx = scenarioComparisonChartCanvas.getContext('2d');
+            scenarioComparisonBarChart = new Chart(ctx, {
+                type: 'bar', data: { labels, datasets },
+                options: { responsive: true, maintainAspectRatio: true, scales: { y: { beginAtZero: true, title: { display: true, text: 'Reales Endkapital (€)' }, ticks: { callback: value => formatCurrency(value) }}, x: { title: { display: true, text: 'Szenarien' }}}, plugins: { tooltip: { mode: 'index', intersect: false, callbacks: { label: context => `${context.dataset.label}: ${formatCurrency(context.parsed.y)}` }}} }
+            });
+            scenarioComparisonChartContainerEl.classList.remove('hidden');
+        }
+
+        calculateButton.addEventListener('click', () => {
+            hideMessage();
+            allScenariosResultsContainerEl.innerHTML = ''; 
+            histogramContainerEl.classList.add('hidden');
+            annualGrowthChartContainerEl.classList.add('hidden');
+            annualGrowthScenarioSelectorEl.classList.add('hidden');
+            scenarioComparisonChartContainerEl.classList.add('hidden');
+            
+            const numSimulations = parseInt(numSimulationsEl.value);
+            if (isNaN(numSimulations) || numSimulations <= 0 || !Number.isInteger(numSimulations) || numSimulations > 100000) {
+                showMessage("Ungültige Anzahl Simulationen (global). Muss eine positive ganze Zahl sein (max. 100.000)."); return;
+            }
+
+            const activeScenarioElements = scenariosContainer.querySelectorAll('.scenario-block');
+            allSimulatedScenariosData = []; 
+            let allInputsValid = true;
+            let globalErrors = [];
+
+            activeScenarioElements.forEach(scenarioEl => {
+                const scenarioId = scenarioEl.id.split('-')[1];
+                const validationErrors = validateScenarioInputs(scenarioId);
+                if (validationErrors.length > 0) {
+                    allInputsValid = false;
+                    globalErrors = globalErrors.concat(validationErrors);
+                } else {
+                    const scenarioData = {
+                        id: scenarioId,
+                        initialInvestment: parseFloat(document.getElementById(`initialInvestment-${scenarioId}`).value),
+                        monthlySavings: parseFloat(document.getElementById(`monthlySavings-${scenarioId}`).value),
+                        investmentHorizonYears: parseInt(document.getElementById(`investmentHorizon-${scenarioId}`).value),
+                        annualExpectedReturn: parseFloat(document.getElementById(`expectedReturn-${scenarioId}`).value) / 100, 
+                        annualInflationRate: parseFloat(document.getElementById(`annualInflation-${scenarioId}`).value) / 100, 
+                        annualVolatility: parseFloat(document.getElementById(`volatility-${scenarioId}`).value) / 100, 
+                        volatilityModel: document.getElementById(`volatilityModel-${scenarioId}`).value,
+                        results: {} 
+                    };
+                    if (scenarioData.volatilityModel === 'garch') {
+                        scenarioData.garchOmega = parseFloat(document.getElementById(`garchOmega-${scenarioId}`).value);
+                        scenarioData.garchAlpha = parseFloat(document.getElementById(`garchAlpha-${scenarioId}`).value);
+                        scenarioData.garchBeta = parseFloat(document.getElementById(`garchBeta-${scenarioId}`).value);
+                        const dfInput = document.getElementById(`garchTDegreesFreedom-${scenarioId}`).value;
+                        scenarioData.garchTDegreesFreedom = (dfInput && dfInput.trim() !== "") ? parseFloat(dfInput) : null; 
+                    }
+                    allSimulatedScenariosData.push(scenarioData);
+                }
+            });
+
+            if (!allInputsValid) { showMessage(globalErrors.join('\n')); return; }
+            if (allSimulatedScenariosData.length === 0) { showMessage("Bitte definieren Sie mindestens ein Szenario."); return; }
+
+            loadingIndicator.classList.remove('hidden');
+            calculateButton.disabled = true;
+            buttonIcon.classList.add('hidden');
+            buttonTextNode.nodeValue = " Berechne...";
+
+            setTimeout(() => { 
+                try {
+                    allSimulatedScenariosData.forEach((scenario) => {
+                        const finalCapitalsNominal = [];
+                        const finalCapitalsReal = []; 
+                        const annualCapitalPathsNominalSimSet = []; 
+                        const annualCapitalPathsRealSimSet = []; 
+                        
+                        let dailyMeanReturnPercent;
+                        if (scenario.volatilityModel === 'garch') {
+                            const dailyMeanReturnDecimal = Math.pow(1 + scenario.annualExpectedReturn, 1 / 252) - 1;
+                            dailyMeanReturnPercent = dailyMeanReturnDecimal * 100;
+                        }
+
+                        for (let i = 0; i < numSimulations; i++) { 
+                            let currentCapitalNominal = scenario.initialInvestment;
+                            let yearlyPathNominalCurrentSim = [];
+                            let yearlyPathRealCurrentSim = []; 
+                            
+                            let sigma_sq_previous_day_percent_sq; 
+                            let epsilon_sq_previous_day_percent_sq; 
+
+                            if (scenario.volatilityModel === 'garch') {
+                                const initialDailyStdDevPercent = (scenario.annualVolatility * 100) / Math.sqrt(252);
+                                sigma_sq_previous_day_percent_sq = Math.pow(initialDailyStdDevPercent, 2);
+                                epsilon_sq_previous_day_percent_sq = sigma_sq_previous_day_percent_sq; 
+                            }
+
+                            for (let m = 0; m < scenario.investmentHorizonYears * 12; m++) { 
+                                let simulatedMonthlyReturnDecimal; 
+
+                                if (scenario.volatilityModel === 'garch') {
+                                    const tradingDaysPerMonth = 21; 
+                                    let monthlyCompoundFactor = 1.0; 
+
+                                    for (let d = 0; d < tradingDaysPerMonth; d++) { 
+                                        let sigma_sq_current_day_percent_sq = scenario.garchOmega +
+                                            scenario.garchAlpha * epsilon_sq_previous_day_percent_sq +
+                                            scenario.garchBeta * sigma_sq_previous_day_percent_sq;
+
+                                        sigma_sq_current_day_percent_sq = Math.max(0.00000001, sigma_sq_current_day_percent_sq); 
+
+                                        const dailyStdDevPercent = Math.sqrt(sigma_sq_current_day_percent_sq);
+                                        
+                                        let randomShock_zt;
+                                        if (scenario.garchTDegreesFreedom !== null && scenario.garchTDegreesFreedom > 2) {
+                                            randomShock_zt = randomStudentT(scenario.garchTDegreesFreedom);
+                                        } else {
+                                            randomShock_zt = randomNorm(); 
+                                        }
+                                        
+                                        const actualEpsilonPercent = randomShock_zt * dailyStdDevPercent; 
+                                        const dailyReturnPercent = dailyMeanReturnPercent + actualEpsilonPercent; 
+                                        monthlyCompoundFactor *= (1 + dailyReturnPercent / 100); 
+                                        epsilon_sq_previous_day_percent_sq = Math.pow(actualEpsilonPercent, 2); 
+                                        sigma_sq_previous_day_percent_sq = sigma_sq_current_day_percent_sq; 
+                                    }
+                                    simulatedMonthlyReturnDecimal = monthlyCompoundFactor - 1.0;
+
+                                } else { 
+                                    const monthlyExpectedReturnDecimal = Math.pow(1 + scenario.annualExpectedReturn, 1 / 12) - 1;
+                                    const monthlyVolatilityDecimal = scenario.annualVolatility / Math.sqrt(12);
+                                    simulatedMonthlyReturnDecimal = monthlyExpectedReturnDecimal + randomNorm() * monthlyVolatilityDecimal;
+                                }
+                                
+                                currentCapitalNominal += scenario.monthlySavings;
+                                currentCapitalNominal *= (1 + simulatedMonthlyReturnDecimal); 
+                                if (currentCapitalNominal < 0) currentCapitalNominal = 0; 
+                                
+                                if ((m + 1) % 12 === 0) { 
+                                    yearlyPathNominalCurrentSim.push(currentCapitalNominal);
+                                    const currentYear = Math.floor((m + 1) / 12);
+                                    const discountFactor = Math.pow(1 / (1 + scenario.annualInflationRate), currentYear);
+                                    yearlyPathRealCurrentSim.push(currentCapitalNominal * discountFactor);
+                                }
+                            } 
+                            finalCapitalsNominal.push(currentCapitalNominal);
+                            const finalDiscountFactor = Math.pow(1 / (1 + scenario.annualInflationRate), scenario.investmentHorizonYears);
+                            finalCapitalsReal.push(currentCapitalNominal * finalDiscountFactor);
+
+                            annualCapitalPathsNominalSimSet.push(yearlyPathNominalCurrentSim);
+                            annualCapitalPathsRealSimSet.push(yearlyPathRealCurrentSim); 
+                        } 
+
+                        finalCapitalsNominal.sort((a, b) => a - b);
+                        scenario.results.meanNominal = finalCapitalsNominal.reduce((acc, val) => acc + val, 0) / numSimulations;
+                        scenario.results.medianNominal = finalCapitalsNominal[Math.floor(numSimulations / 2)];
+                        scenario.results.p5Nominal = finalCapitalsNominal[Math.floor(numSimulations * 0.05)];
+                        scenario.results.p95Nominal = finalCapitalsNominal[Math.floor(numSimulations * 0.95)];
+                        
+                        finalCapitalsReal.sort((a, b) => a - b);
+                        scenario.results.meanReal = finalCapitalsReal.reduce((acc, val) => acc + val, 0) / numSimulations;
+                        scenario.results.medianReal = finalCapitalsReal[Math.floor(numSimulations / 2)];
+                        scenario.results.p5Real = finalCapitalsReal[Math.floor(numSimulations * 0.05)];
+                        scenario.results.p95Real = finalCapitalsReal[Math.floor(numSimulations * 0.95)];
+                        
+                        const capitalAtEachYearReal = Array.from({ length: scenario.investmentHorizonYears }, () => []);
+                        for (let simIdx = 0; simIdx < numSimulations; simIdx++) {
+                            for (let y = 0; y < scenario.investmentHorizonYears; y++) {
+                                if (annualCapitalPathsRealSimSet[simIdx] && annualCapitalPathsRealSimSet[simIdx][y] !== undefined) {
+                                    capitalAtEachYearReal[y].push(annualCapitalPathsRealSimSet[simIdx][y]);
+                                }
+                            }
+                        }
+                        capitalAtEachYearReal.forEach(yearData => yearData.sort((a, b) => a - b));
+                        
+                        // Startwert für reale Pfade ist das reale Startkapital (welches nominal ist, da Inflation erst ab Jahr 1 wirkt)
+                        const realInitialInvestmentForPath = scenario.initialInvestment;
+
+                        scenario.results.p5AnnualPathReal = capitalAtEachYearReal.map(yearData => yearData.length > 0 ? yearData[Math.floor(yearData.length * 0.05)] : realInitialInvestmentForPath); 
+                        scenario.results.p50AnnualPathReal = capitalAtEachYearReal.map(yearData => yearData.length > 0 ? yearData[Math.floor(yearData.length * 0.50)] : realInitialInvestmentForPath);
+                        scenario.results.p95AnnualPathReal = capitalAtEachYearReal.map(yearData => yearData.length > 0 ? yearData[Math.floor(yearData.length * 0.95)] : realInitialInvestmentForPath);
+                        scenario.results.avgAnnualPathReal = Array.from({length: scenario.investmentHorizonYears}, (_, y_idx) => {
+                            const yearData = capitalAtEachYearReal[y_idx];
+                            return yearData.length > 0 ? yearData.reduce((sum, val) => sum + val, 0) / yearData.length : realInitialInvestmentForPath;
+                        });
+                        
+                        scenario.results.cumulativeDepositsPathNominal = [scenario.initialInvestment];
+                        for (let y = 1; y <= scenario.investmentHorizonYears; y++) {
+                            scenario.results.cumulativeDepositsPathNominal.push(scenario.initialInvestment + (scenario.monthlySavings * 12 * y));
+                        }
+
+                        if (scenario.id === '1') scenario.results.finalCapitalsForHistogram = finalCapitalsReal; 
+                    });
+
+                    allScenariosResultsContainerEl.innerHTML = ''; 
+                    allSimulatedScenariosData.forEach(scenario => {
+                        const resultsHTML = `
+                            <div class="results-block" id="results-scenario-${scenario.id}">
+                                <h4>Simulationsergebnisse (Szenario ${scenario.id})</h4>
+                                <div class="result-grid">
+                                    <div class="result-item"><p class="text-sm text-gray-600 font-medium">Durchschnitt (Nominal)</p><p class="text-xl font-bold text-gray-800">${formatCurrency(scenario.results.meanNominal)}</p></div>
+                                    <div class="result-item"><p class="text-sm text-green-700 font-medium">Durchschnitt (Real)</p><p class="text-xl font-bold text-green-800">${formatCurrency(scenario.results.meanReal)}</p></div>
+                                    
+                                    <div class="result-item"><p class="text-sm text-gray-600 font-medium">Median P50 (Nominal)</p><p class="text-xl font-bold text-gray-800">${formatCurrency(scenario.results.medianNominal)}</p></div>
+                                    <div class="result-item"><p class="text-sm text-blue-700 font-medium">Median P50 (Real)</p><p class="text-xl font-bold text-blue-800">${formatCurrency(scenario.results.medianReal)}</p></div>
+                                    
+                                    <div class="result-item"><p class="text-sm text-gray-600 font-medium">Pessimistisch P5 (Nominal)</p><p class="text-xl font-bold text-gray-800">${formatCurrency(scenario.results.p5Nominal)}</p></div>
+                                    <div class="result-item"><p class="text-sm text-red-700 font-medium">Pessimistisch P5 (Real)</p><p class="text-xl font-bold text-red-800">${formatCurrency(scenario.results.p5Real)}</p></div>
+                                    
+                                    <div class="result-item"><p class="text-sm text-gray-600 font-medium">Optimistisch P95 (Nominal)</p><p class="text-xl font-bold text-gray-800">${formatCurrency(scenario.results.p95Nominal)}</p></div>
+                                    <div class="result-item"><p class="text-sm text-yellow-700 font-medium">Optimistisch P95 (Real)</p><p class="text-xl font-bold text-yellow-800">${formatCurrency(scenario.results.p95Real)}</p></div>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-2">Nominale Einzahlungen gesamt: ${formatCurrency(scenario.initialInvestment + scenario.monthlySavings * scenario.investmentHorizonYears * 12)}</p>
+                            </div>`;
+                        allScenariosResultsContainerEl.insertAdjacentHTML('beforeend', resultsHTML);
+                    });
+                    
+                    const scenario1Data = allSimulatedScenariosData.find(s => s.id === '1');
+                    if (scenario1Data && scenario1Data.results.finalCapitalsForHistogram) { 
+                        displayHistogram(scenario1Data.results.finalCapitalsForHistogram, scenario1Data.id);
+                    }
+                    
+                    if (allSimulatedScenariosData.length > 0) {
+                         displayScenarioComparisonChart(allSimulatedScenariosData); 
+                         populateAnnualGrowthScenarioSelector(allSimulatedScenariosData); 
+                         displayAnnualGrowthChart(allSimulatedScenariosData); 
+                    }
+
+                } catch (error) {
+                    console.error("Simulationsfehler:", error);
+                    showMessage("Ein Fehler ist während der Simulation aufgetreten. Bitte überprüfen Sie die Eingaben und versuchen Sie es erneut. Details: " + error.message);
+                } finally {
+                    loadingIndicator.classList.add('hidden');
+                    calculateButton.disabled = false;
+                    buttonIcon.classList.remove('hidden');
+                    buttonTextNode.nodeValue = " Simulation starten";
+                }
+            }, 50); 
+        });
+    </script>
+</body>
+</html>
